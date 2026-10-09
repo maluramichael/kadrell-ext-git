@@ -1,0 +1,15 @@
+{
+  "name": "git",
+  "version": "0.1.0",
+  "description": "Clone remote repositories (GitHub, Bitbucket, your own git) straight from the new-session dialog.",
+  "apiVersion": 1,
+  "permissions": ["exec", "http", "sessions"],
+  "settings": [
+    { "key": "githubClientId", "type": "string", "label": "GitHub OAuth app client ID" },
+    { "key": "githubOrgs", "type": "string", "label": "GitHub orgs (one per line, blank = your repos)" },
+    { "key": "bitbucketWorkspace", "type": "string", "label": "Bitbucket workspace" },
+    { "key": "bitbucketToken", "type": "secret", "label": "Bitbucket access token" },
+    { "key": "vaultRepos", "type": "string", "label": "Extra git URLs, one per line" },
+    { "key": "cloneRoot", "type": "string", "label": "Clone into (base folder)", "default": "~/development/projects" }
+  ]
+}
