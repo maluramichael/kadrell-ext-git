@@ -1,23 +1,38 @@
 -- kadrell-git: entfernte Repositories (GitHub, Bitbucket, eigene git-URLs) im Neue-Session-Dialog (⌘N).
 -- Auswahl klont ins cloneRoot und öffnet dort eine Session. Docs: https://kadrell.malura.de/extensions
--- Labels englisch: die Prelude reicht die Host-Sprache (locale) nicht an die Extension durch.
 -- Host-Aufrufe (http, exec, run, secret, storage) laufen nur in Handlern.
 
 local P = dofile((debug.getinfo(1, "S").source:match("^@(.*/)")) .. "providers.lua")
 
+-- Sprache aus der Kadrell-Einstellung (de/en), Englisch als Rückfall.
+local lang = (kadrell.locale or "en"):sub(1, 2)
+local T = {
+  en = { connectGithub = "Connect GitHub", refresh = "Refresh repos", connected = "connected",
+         disconnected = "not connected", enterCode = "enter code ", cached = " repos cached, open Cmd-N to clone",
+         cloning = "Cloning ", cloneFailed = "clone failed",
+         needClientId = "Set the GitHub OAuth app client ID in the settings first." },
+  de = { connectGithub = "Mit GitHub verbinden", refresh = "Repos aktualisieren", connected = "verbunden",
+         disconnected = "nicht verbunden", enterCode = "Code eingeben ", cached = " Repos im Cache, Cmd+N zum Klonen",
+         cloning = "Klone ", cloneFailed = "Klonen fehlgeschlagen",
+         needClientId = "Erst die GitHub-OAuth-App-Client-ID in den Einstellungen setzen." },
+}
+local function tr(k) return (T[lang] or T.en)[k] or k end
+
 local HOME = os.getenv("HOME") or ""
-local cache = {}        -- { provider, slug, url }, Quelle für palette und Klon-URL
-local ghStatus = "not connected"
+local cache = {}            -- { provider, slug, url }, Quelle für palette und Klon-URL
+local ghState = "disconnected"  -- "connected" | "disconnected"
+local ghCode = nil          -- user_code während des Device Flow
 local lastError = nil
 
 local function render()
+  local label = ghCode and (tr("enterCode") .. ghCode) or tr(ghState)
   local children = {
     { type = "section", title = "GitHub", children = {
-      { type = "text", text = "GitHub: " .. ghStatus, color = ghStatus == "connected" and "ok" or "warn" },
-      { type = "button", label = "Connect GitHub", action = "gh:connect" },
+      { type = "text", text = "GitHub: " .. label, color = ghState == "connected" and "ok" or "warn" },
+      { type = "button", label = tr("connectGithub"), action = "gh:connect" },
     } },
-    { type = "text", text = #cache .. " repos cached, open Cmd-N to clone", color = "muted" },
-    { type = "button", label = "Refresh repos", action = "refresh" },
+    { type = "text", text = #cache .. tr("cached"), color = "muted" },
+    { type = "button", label = tr("refresh"), action = "refresh" },
   }
   if lastError then table.insert(children, 1, { type = "text", text = lastError, color = "err" }) end
   kadrell.panel.set{ title = "Repos", children = children }
@@ -37,7 +52,7 @@ end
 local function listGithub()
   local token = kadrell.secret.get("github:token")
   if not token then return {} end
-  ghStatus = "connected"
+  ghState = "connected"
   local urls = {}
   local orgs = lines(kadrell.config.githubOrgs)
   if #orgs == 0 then
@@ -95,7 +110,7 @@ local function pollToken(clientId, deviceCode, interval)
     local d = resp.body and kadrell.json.decode(resp.body) or {}
     if d.access_token then
       kadrell.secret.set("github:token", d.access_token)
-      ghStatus = "connected"
+      ghState, ghCode = "connected", nil
       refresh()
     elseif d.error == "authorization_pending" then
       pollToken(clientId, deviceCode, interval)
@@ -103,7 +118,7 @@ local function pollToken(clientId, deviceCode, interval)
       pollToken(clientId, deviceCode, interval + 5)
     else
       lastError = "GitHub: " .. tostring(d.error or resp.status)
-      ghStatus = "not connected"
+      ghState, ghCode = "disconnected", nil
       render()
     end
   end)
@@ -112,7 +127,7 @@ end
 local function connectGithub()
   local clientId = kadrell.config.githubClientId
   if not clientId or clientId == "" then
-    lastError = "Set the GitHub OAuth app client ID in the settings first."
+    lastError = tr("needClientId")
     return render()
   end
   local resp = kadrell.http{ method = "POST", url = "https://github.com/login/device/code",
@@ -122,7 +137,7 @@ local function connectGithub()
     lastError = "GitHub device code: HTTP " .. tostring(resp.status)
     return render()
   end
-  ghStatus = "enter code " .. tostring(d.user_code)
+  ghCode = tostring(d.user_code)
   kadrell.exec({ "open", d.verification_uri })
   render()
   pollToken(clientId, d.device_code, tonumber(d.interval) or 5)
@@ -146,14 +161,14 @@ kadrell.on("palette.select", function(d)
     lastError = "No clone URL for " .. tostring(d.id)
     return render()
   end
-  kadrell.status.set{ text = "Cloning " .. (slug or ""), color = "accent" }
+  kadrell.status.set{ text = tr("cloning") .. (slug or ""), color = "accent" }
   local r = kadrell.exec({ "git", "clone", url, target })
   if r.status == 0 then
     kadrell.status.clear()
     kadrell.run("new", "-c", target)
   else
-    lastError = "Clone failed: " .. tostring((r.stderr or ""):gsub("%s+$", ""))
-    kadrell.status.set{ text = "clone failed", color = "err" }
+    lastError = tr("cloneFailed") .. ": " .. tostring((r.stderr or ""):gsub("%s+$", ""))
+    kadrell.status.set{ text = tr("cloneFailed"), color = "err" }
     render()
   end
 end)
@@ -166,7 +181,7 @@ end)
 
 kadrell.on("app.ready", function()
   cache = kadrell.storage.get("repos") or {}
-  if kadrell.secret.get("github:token") then ghStatus = "connected" end
+  if kadrell.secret.get("github:token") then ghState = "connected" end
   kadrell.palette.set(P.items(cache))
   render()
   refresh()
